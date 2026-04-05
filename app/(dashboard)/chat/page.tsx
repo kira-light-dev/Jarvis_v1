@@ -25,32 +25,38 @@ const MOOD_HINTS: Record<string, string> = {
   neutral: "What's on your mind?"
 }
 
-const MOOD_PROMPTS: Record<string, string[]> = {
-  overwhelmed: [
-    "What's the one thing that actually matters right now?",
-    "Help me cut my task list down",
-    "I need to vent for a second"
-  ],
-  anxious: [
-    "Be honest — am I behind?",
-    "Give me something small I can finish right now",
-    "Talk me through my exam plan"
-  ],
-  focused: [
-    "Deep dive: let's do DSA today",
-    "Review my goals with me",
-    "Give me a hard problem to solve"
-  ],
-  driven: [
-    "What should I conquer today?",
-    "Push me harder on DSA",
-    "Let's map out this week"
-  ],
-  neutral: [
-    "What should I focus on today?",
-    "Review my week with me",
-    "Help me think through something"
-  ]
+// Dynamic prompts based on DSA level
+function getQuickPrompts(dsaLevel: string): string[] {
+  switch (dsaLevel) {
+    case 'beginner':
+      return [
+        'Explain Two Sum step by step',
+        'What should I learn after Arrays?',
+        'Help me build a study plan',
+        'What is time complexity?'
+      ]
+    case 'intermediate':
+      return [
+        "I'm stuck on Dynamic Programming",
+        'Explain graph BFS vs DFS',
+        'Review my approach to this problem',
+        'Help me prep for system design'
+      ]
+    case 'advanced':
+      return [
+        'Mock interview me on trees',
+        'What are the hardest DP patterns?',
+        'Review my system design',
+        'Give me a hard problem to solve'
+      ]
+    default:
+      return [
+        'What should I focus on today?',
+        'Review my week with me',
+        'Help me think through something',
+        'I need a study plan'
+      ]
+  }
 }
 
 export default function ChatPage() {
@@ -65,7 +71,7 @@ export default function ChatPage() {
 
   const currentMood = user?.characterDNA?.currentMood || 'neutral'
   const hintText = MOOD_HINTS[currentMood] || MOOD_HINTS.neutral
-  const quickPrompts = MOOD_PROMPTS[currentMood] || MOOD_PROMPTS.neutral
+  const quickPrompts = getQuickPrompts(user?.dsaLevel || 'beginner')
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -173,6 +179,13 @@ export default function ChatPage() {
                       delay={500}
                     />
                   </p>
+                  {/* DNA indicator — subtle gold pulsing dot when JARVIS knows the user */}
+                  {user?.characterDNA?.currentMood && user.characterDNA.currentMood !== 'neutral' && (
+                    <p className="text-xs text-muted-foreground mt-2">
+                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-pulse-glow mr-1.5 align-middle" />
+                      <span className="align-middle">JARVIS knows you right now</span>
+                    </p>
+                  )}
                 </FadeIn>
 
                 <FadeIn delay={1.5}>

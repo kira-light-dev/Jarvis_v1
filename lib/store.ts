@@ -13,6 +13,10 @@ export interface CharacterDNA {
   biggestFear: string
   coreMotivation: string
   lastUpdated: string
+  // Zep rolling summary fields
+  conversationSummary?: string
+  summaryUpdatedAt?: string
+  totalMessageCount?: number
 }
 
 export interface UserProfile {
