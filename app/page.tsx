@@ -23,10 +23,32 @@ const QUESTIONS = [
   "One word. How are you, really, right now?"
 ]
 
-const HYBRID_CHIPS: Record<number, string[]> = {
-  2: ["Push harder", "Go quiet", "Spiral", "Depends on the day"],
-  5: ["Got my dream job", "Built something meaningful", "Found balance", "Made an impact"],
-  8: ["Just listen", "Give me a plan", "Challenge me", "Leave me alone"]
+// Chips for ALL questions
+const QUESTION_CHIPS: Record<number, string[]> = {
+  0: ["Reading / building things", "Doom-scrolling honestly", "Gaming or music", "Thinking too much"],
+  1: ["My family's expectations", "Not living up to my potential", "A goal I keep postponing", "I'd rather type this"],
+  2: ["Push harder", "Go quiet", "Spiral a bit", "Depends completely"],
+  3: ["Deep focus, no interruptions", "Being outside, moving", "Creating something", "Just... rest"],
+  4: ["Start working out", "Build something", "Learn a skill properly", "Read more"],
+  5: ["Got placed at a good company", "Built something people use", "Figured out who I am", "Something else"],
+  6: ["It teaches me", "It breaks me first, then teaches", "I avoid it honestly", "Both depending on the day"],
+  7: ["Panic then hyperfocus", "Give up and sleep", "Ask for help", "Power through somehow"],
+  8: ["Someone to just listen", "Honest advice, no sugarcoating", "A push when I'm slacking", "Space to figure it out"],
+  9: ["Tired", "Okay", "Anxious", "Actually good"]
+}
+
+// Placeholder hints per question
+const PLACEHOLDER_HINTS: Record<number, string> = {
+  0: "or describe it in your own words...",
+  1: "safe to be honest here...",
+  2: "or describe what actually happens...",
+  3: "or write anything...",
+  4: "or write anything...",
+  5: "or write anything...",
+  6: "or write anything...",
+  7: "or write anything...",
+  8: "or write anything...",
+  9: "or write anything..."
 }
 
 type Stage = 'opening' | 'questions' | 'processing'
@@ -40,8 +62,13 @@ export default function OnboardingPage() {
   const [inputValue, setInputValue] = useState('')
   const [showInput, setShowInput] = useState(false)
   const [titleComplete, setTitleComplete] = useState(false)
+  const [initializingVisible, setInitializingVisible] = useState(false)
+  const [lineDrawn, setLineDrawn] = useState(false)
+  const [subtitleVisible, setSubtitleVisible] = useState(false)
+  const [selectedChip, setSelectedChip] = useState<string | null>(null)
   const [processingText, setProcessingText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const chipSubmitTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
     if (isOnboarded) {
@@ -49,12 +76,26 @@ export default function OnboardingPage() {
     }
   }, [isOnboarded, router])
 
+  // Boot sequence animation
   useEffect(() => {
-    if (stage === 'opening' && titleComplete) {
-      const timer = setTimeout(() => setShowInput(true), 1800)
-      return () => clearTimeout(timer)
+    if (titleComplete) {
+      // Show INITIALIZING after JARVIS finishes
+      const initTimer = setTimeout(() => setInitializingVisible(true), 200)
+      // Draw line after INITIALIZING
+      const lineTimer = setTimeout(() => setLineDrawn(true), 800)
+      // Show subtitle after line
+      const subtitleTimer = setTimeout(() => setSubtitleVisible(true), 1200)
+      // Show input after everything
+      const inputTimer = setTimeout(() => setShowInput(true), 2000)
+      
+      return () => {
+        clearTimeout(initTimer)
+        clearTimeout(lineTimer)
+        clearTimeout(subtitleTimer)
+        clearTimeout(inputTimer)
+      }
     }
-  }, [stage, titleComplete])
+  }, [titleComplete])
 
   useEffect(() => {
     if (showInput && textareaRef.current) {
@@ -62,13 +103,25 @@ export default function OnboardingPage() {
     }
   }, [showInput, currentQuestion])
 
+  // Cleanup chip submit timer on unmount
+  useEffect(() => {
+    return () => {
+      if (chipSubmitTimerRef.current) {
+        clearTimeout(chipSubmitTimerRef.current)
+      }
+    }
+  }, [])
+
   const handleSubmit = () => {
-    if (!inputValue.trim()) return
+    // Textarea value takes priority, then selected chip
+    const valueToSubmit = inputValue.trim() || selectedChip
+    if (!valueToSubmit) return
     
     const newAnswers = [...answers]
-    newAnswers[currentQuestion] = inputValue.trim()
+    newAnswers[currentQuestion] = valueToSubmit
     setAnswers(newAnswers)
     setInputValue('')
+    setSelectedChip(null)
     
     if (currentQuestion < 9) {
       setCurrentQuestion(prev => prev + 1)
@@ -79,12 +132,21 @@ export default function OnboardingPage() {
   }
 
   const handleChipClick = (chip: string) => {
+    // Clear any existing timer
+    if (chipSubmitTimerRef.current) {
+      clearTimeout(chipSubmitTimerRef.current)
+    }
+    
+    setSelectedChip(chip)
     setInputValue(chip)
-    setTimeout(() => {
+    
+    // Auto-submit after 500ms
+    chipSubmitTimerRef.current = setTimeout(() => {
       const newAnswers = [...answers]
       newAnswers[currentQuestion] = chip
       setAnswers(newAnswers)
       setInputValue('')
+      setSelectedChip(null)
       
       if (currentQuestion < 9) {
         setCurrentQuestion(prev => prev + 1)
@@ -92,13 +154,28 @@ export default function OnboardingPage() {
         setStage('processing')
         processOnboarding(newAnswers)
       }
-    }, 400)
+    }, 500)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
+      // Clear chip timer if user presses enter
+      if (chipSubmitTimerRef.current) {
+        clearTimeout(chipSubmitTimerRef.current)
+      }
       handleSubmit()
+    }
+  }
+
+  const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInputValue(e.target.value)
+    // Clear chip selection and timer when user types
+    if (chipSubmitTimerRef.current) {
+      clearTimeout(chipSubmitTimerRef.current)
+    }
+    if (e.target.value !== selectedChip) {
+      setSelectedChip(null)
     }
   }
 
@@ -111,7 +188,7 @@ export default function OnboardingPage() {
     // Create basic user profile
     const userProfile: UserProfile = {
       id: Date.now().toString(),
-      name: 'Student', // Will be extracted or asked later
+      name: 'Student',
       email: `user-${Date.now()}@jarvis.app`,
       branch: 'Computer Science',
       semester: 4,
@@ -141,7 +218,6 @@ export default function OnboardingPage() {
       }
     } catch (error) {
       console.error('Onboarding API error:', error)
-      // Continue with default profile
     }
 
     setUser(userProfile)
@@ -163,34 +239,49 @@ export default function OnboardingPage() {
             exit={{ opacity: 0 }}
             className="text-center"
           >
-            <h1 className="text-6xl font-bold tracking-tight text-primary">
+            {/* Elegant JARVIS logo treatment */}
+            <h1 className="text-7xl font-thin tracking-[0.3em] text-primary">
               <TypingEffect 
-                text="J.A.R.V.I.S." 
-                speed={60} 
+                text="JARVIS" 
+                speed={80} 
                 cursor={false}
                 onComplete={() => setTitleComplete(true)}
               />
             </h1>
             
-            {titleComplete && (
-              <>
-                <motion.p
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 0.8 }}
-                  className="text-xl text-muted-foreground mt-4"
-                >
-                  Let&apos;s get to know you.
-                </motion.p>
-                
-                <motion.div
-                  initial={{ opacity: 0, scaleX: 0 }}
-                  animate={{ opacity: 0.3, scaleX: 1 }}
-                  transition={{ delay: 1.4 }}
-                  className="w-48 h-px bg-primary mx-auto mt-6"
-                />
-              </>
-            )}
+            {/* Thin horizontal rule - draws from center */}
+            <motion.div
+              initial={{ scaleX: 0, opacity: 0 }}
+              animate={{ 
+                scaleX: lineDrawn ? 1 : 0, 
+                opacity: lineDrawn ? 0.3 : 0 
+              }}
+              transition={{ duration: 0.4, ease: 'easeOut' }}
+              className="w-16 h-px bg-primary mx-auto mt-4 origin-center"
+            />
+            
+            {/* INITIALIZING text */}
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: initializingVisible ? 0.5 : 0 }}
+              transition={{ duration: 0.6 }}
+              className="text-xs tracking-[0.4em] uppercase text-muted-foreground/50 mt-3"
+            >
+              INITIALIZING
+            </motion.p>
+            
+            {/* Subtitle */}
+            <motion.p
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ 
+                opacity: subtitleVisible ? 1 : 0,
+                y: subtitleVisible ? 0 : 10
+              }}
+              transition={{ duration: 0.5 }}
+              className="text-xl text-muted-foreground mt-6"
+            >
+              Let&apos;s get to know you.
+            </motion.p>
           </motion.div>
         )}
 
@@ -236,14 +327,41 @@ export default function OnboardingPage() {
                   </p>
                 </div>
 
+                {/* Option Chips - above textarea */}
+                {QUESTION_CHIPS[currentQuestion] && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.2 }}
+                    className="flex flex-wrap gap-2"
+                  >
+                    {QUESTION_CHIPS[currentQuestion].map((chip) => (
+                      <Badge
+                        key={chip}
+                        variant="outline"
+                        className={cn(
+                          "cursor-pointer border-primary/20 bg-transparent hover:bg-primary/10 hover:border-primary/50",
+                          "text-xs text-muted-foreground hover:text-primary rounded-full px-3 py-1.5",
+                          "transition-all duration-200 ease-in-out",
+                          selectedChip === chip && "bg-primary/20 border-primary scale-95 text-primary"
+                        )}
+                        onClick={() => handleChipClick(chip)}
+                      >
+                        {chip}
+                      </Badge>
+                    ))}
+                  </motion.div>
+                )}
+
+                {/* Textarea - below chips */}
                 <div className="relative">
                   <textarea
                     ref={textareaRef}
                     value={inputValue}
-                    onChange={(e) => setInputValue(e.target.value)}
+                    onChange={handleTextareaChange}
                     onKeyDown={handleKeyDown}
-                    placeholder="..."
-                    className="w-full bg-transparent border-0 border-b border-border/50 focus:border-primary transition-colors duration-300 resize-none min-h-[60px] outline-none text-foreground placeholder:text-muted-foreground/50 pb-2"
+                    placeholder={PLACEHOLDER_HINTS[currentQuestion] || "..."}
+                    className="w-full bg-transparent border-0 border-b border-border/30 focus:border-primary transition-colors duration-300 resize-none min-h-[60px] outline-none text-foreground placeholder:text-muted-foreground/50 pb-2"
                     rows={2}
                   />
                   
@@ -259,30 +377,6 @@ export default function OnboardingPage() {
                     </motion.button>
                   )}
                 </div>
-
-                {/* Hybrid chips for specific questions */}
-                {HYBRID_CHIPS[currentQuestion] && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.3 }}
-                    className="flex flex-wrap gap-2"
-                  >
-                    {HYBRID_CHIPS[currentQuestion].map((chip) => (
-                      <Badge
-                        key={chip}
-                        variant="outline"
-                        className={cn(
-                          "cursor-pointer border-primary/30 hover:bg-primary/10 transition-colors px-3 py-1.5",
-                          inputValue === chip && "bg-primary/10 border-primary"
-                        )}
-                        onClick={() => handleChipClick(chip)}
-                      >
-                        {chip}
-                      </Badge>
-                    ))}
-                  </motion.div>
-                )}
               </motion.div>
             </AnimatePresence>
           </motion.div>
