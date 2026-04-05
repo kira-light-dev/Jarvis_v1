@@ -20,7 +20,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { Plus, ExternalLink, MoreVertical, Trash2, Edit, X, GripVertical } from 'lucide-react'
+import { Plus, ExternalLink, MoreVertical, Trash2, GripVertical, Check, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -48,7 +48,9 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { FadeIn, StaggerContainer, StaggerItem } from '@/components/motion'
+import { useUserStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
+import { springConfig, cardItem } from '@/lib/animations'
 import type { ProblemStatus, ProblemDifficulty } from '@/lib/models/DSAProblem'
 
 interface Problem {
@@ -60,29 +62,44 @@ interface Problem {
   link?: string
   notes?: string
   timesRevisited: number
+  // SM-2 fields
+  easeFactor: number
+  interval: number
+  nextReview: string | null
+  lastReviewedAt: string | null
+  reviewQuality: 0 | 1 | 2 | 3 | 4 | 5 | null
 }
 
-const columns: { id: ProblemStatus; title: string; color: string }[] = [
+// SM-2 Algorithm
+function calculateSM2(easeFactor: number, interval: number, quality: number) {
+  let newInterval: number
+  let newEaseFactor: number
+  if (quality >= 3) {
+    if (interval === 0) newInterval = 1
+    else if (interval === 1) newInterval = 6
+    else newInterval = Math.round(interval * easeFactor)
+    newEaseFactor = Math.max(1.3, easeFactor + 0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02))
+  } else {
+    newInterval = 1
+    newEaseFactor = Math.max(1.3, easeFactor - 0.2)
+  }
+  const nextReview = new Date()
+  nextReview.setDate(nextReview.getDate() + newInterval)
+  return { newInterval, newEaseFactor, nextReview: nextReview.toISOString() }
+}
+
+const columns: { id: ProblemStatus | 'review-today'; title: string; color: string }[] = [
+  { id: 'review-today', title: 'Review Today', color: 'text-primary' },
   { id: 'todo', title: 'To Do', color: 'text-muted-foreground' },
   { id: 'in-progress', title: 'In Progress', color: 'text-yellow-500' },
-  { id: 'review', title: 'Review', color: 'text-blue-500' },
-  { id: 'completed', title: 'Completed', color: 'text-green-500' },
+  { id: 'review', title: 'Struggling', color: 'text-orange-500' },
+  { id: 'completed', title: 'Mastered', color: 'text-green-500' },
 ]
 
 const topics = [
-  'Arrays',
-  'Strings',
-  'Linked List',
-  'Trees',
-  'Binary Search',
-  'Dynamic Programming',
-  'Graphs',
-  'Sorting',
-  'Heap',
-  'Stack & Queue',
-  'Backtracking',
-  'Greedy',
-  'Other',
+  'Arrays', 'Strings', 'Linked List', 'Trees', 'Binary Search',
+  'Dynamic Programming', 'Graphs', 'Sorting', 'Heap', 'Stack & Queue',
+  'Backtracking', 'Greedy', 'Other',
 ]
 
 const difficultyColors = {
@@ -92,6 +109,7 @@ const difficultyColors = {
 }
 
 export default function DSAPage() {
+  const addXP = useUserStore((state) => state.addXP)
   const [problems, setProblems] = useState<Problem[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -118,7 +136,16 @@ export default function DSAPage() {
     try {
       const res = await fetch('/api/dsa')
       const data = await res.json()
-      setProblems(data)
+      // Add default SM-2 fields if missing
+      const problemsWithSM2 = data.map((p: Problem) => ({
+        ...p,
+        easeFactor: p.easeFactor ?? 2.5,
+        interval: p.interval ?? 1,
+        nextReview: p.nextReview ?? null,
+        lastReviewedAt: p.lastReviewedAt ?? null,
+        reviewQuality: p.reviewQuality ?? null
+      }))
+      setProblems(problemsWithSM2)
     } catch (error) {
       console.error('Failed to fetch problems:', error)
     } finally {
@@ -139,18 +166,16 @@ export default function DSAPage() {
     const activeId = active.id as string
     const overId = over.id as string
 
-    // Check if dropped on a column
-    const newStatus = columns.find((col) => col.id === overId)?.id
+    // Check if dropped on a column (exclude review-today as it's computed)
+    const newStatus = columns.find((col) => col.id === overId && col.id !== 'review-today')?.id as ProblemStatus | undefined
 
     if (newStatus) {
       const problem = problems.find((p) => p._id === activeId)
       if (problem && problem.status !== newStatus) {
-        // Update locally first for instant feedback
         setProblems((prev) =>
           prev.map((p) => (p._id === activeId ? { ...p, status: newStatus } : p))
         )
 
-        // Then update on server
         try {
           await fetch('/api/dsa', {
             method: 'PUT',
@@ -159,10 +184,58 @@ export default function DSAPage() {
           })
         } catch (error) {
           console.error('Failed to update problem:', error)
-          // Revert on error
           fetchProblems()
         }
       }
+    }
+  }
+
+  const handleReview = async (problemId: string, quality: 1 | 3 | 5) => {
+    const problem = problems.find(p => p._id === problemId)
+    if (!problem) return
+
+    const { newInterval, newEaseFactor, nextReview } = calculateSM2(
+      problem.easeFactor,
+      problem.interval,
+      quality
+    )
+
+    const newStatus: ProblemStatus = quality >= 3 ? 'completed' : 'review'
+    const xpReward = quality === 5 ? 15 : quality === 3 ? 10 : 5
+
+    // Update locally first
+    setProblems(prev => prev.map(p => 
+      p._id === problemId 
+        ? { 
+            ...p, 
+            easeFactor: newEaseFactor, 
+            interval: newInterval, 
+            nextReview,
+            lastReviewedAt: new Date().toISOString(),
+            reviewQuality: quality,
+            status: newStatus
+          } 
+        : p
+    ))
+
+    addXP(xpReward)
+
+    try {
+      await fetch('/api/dsa', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          id: problemId, 
+          easeFactor: newEaseFactor, 
+          interval: newInterval, 
+          nextReview,
+          lastReviewedAt: new Date().toISOString(),
+          status: newStatus
+        }),
+      })
+    } catch (error) {
+      console.error('Failed to update review:', error)
+      fetchProblems()
     }
   }
 
@@ -177,10 +250,15 @@ export default function DSAPage() {
           ...newProblem,
           userId: 'demo-user',
           timesRevisited: 0,
+          easeFactor: 2.5,
+          interval: 1,
+          nextReview: null,
+          lastReviewedAt: null,
+          reviewQuality: null
         }),
       })
       const data = await res.json()
-      setProblems((prev) => [data, ...prev])
+      setProblems((prev) => [{ ...data, easeFactor: 2.5, interval: 1 }, ...prev])
       setNewProblem({
         title: '',
         topic: 'Arrays',
@@ -207,39 +285,48 @@ export default function DSAPage() {
 
   const activeProblem = problems.find((p) => p._id === activeId)
 
+  // Calculate stats
+  const today = new Date().toISOString().split('T')[0]
+  const dueToday = problems.filter(p => {
+    if (!p.nextReview) return false
+    return p.nextReview.split('T')[0] <= today
+  })
+  
   const stats = {
     total: problems.length,
-    completed: problems.filter((p) => p.status === 'completed').length,
-    easy: problems.filter((p) => p.difficulty === 'easy').length,
-    medium: problems.filter((p) => p.difficulty === 'medium').length,
-    hard: problems.filter((p) => p.difficulty === 'hard').length,
+    mastered: problems.filter((p) => p.status === 'completed').length,
+    dueToday: dueToday.length,
+    struggling: problems.filter((p) => p.status === 'review').length,
+  }
+
+  // Filter problems for each column
+  const getProblemsForColumn = (columnId: string) => {
+    if (columnId === 'review-today') {
+      return dueToday
+    }
+    return problems.filter((p) => p.status === columnId && !dueToday.some(d => d._id === p._id))
   }
 
   return (
-    <div className="flex h-full flex-col p-4 md:p-6">
+    <motion.div 
+      className="flex h-full flex-col p-4 md:p-6"
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+    >
       <FadeIn>
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-primary">DSA Tracker</h1>
-            <p className="text-muted-foreground">
-              Track your problem-solving progress
+            <h1 className="text-2xl font-bold text-primary animate-text-glow">DSA Tracker</h1>
+            <p className="text-xs text-muted-foreground font-mono mt-1">
+              {stats.total} Total · {stats.mastered} Mastered · {stats.dueToday} Due Today · {stats.struggling} Struggling
             </p>
           </div>
 
           <div className="flex items-center gap-4">
-            <div className="flex gap-2 text-sm">
-              <Badge variant="outline" className="bg-card">
-                {stats.completed}/{stats.total} solved
-              </Badge>
-              <Badge variant="outline" className={difficultyColors.easy}>
-                E: {stats.easy}
-              </Badge>
-              <Badge variant="outline" className={difficultyColors.medium}>
-                M: {stats.medium}
-              </Badge>
-              <Badge variant="outline" className={difficultyColors.hard}>
-                H: {stats.hard}
-              </Badge>
+            <div className="flex items-center gap-2 text-xs font-mono">
+              <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+              <span className="text-muted-foreground">Spaced Repetition Active</span>
             </div>
 
             <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
@@ -355,14 +442,16 @@ export default function DSAPage() {
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 flex-1 min-h-0">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 flex-1 min-h-0">
           {columns.map((column) => (
             <KanbanColumn
               key={column.id}
               column={column}
-              problems={problems.filter((p) => p.status === column.id)}
+              problems={getProblemsForColumn(column.id)}
               onDelete={handleDeleteProblem}
+              onReview={handleReview}
               isLoading={isLoading}
+              isReviewColumn={column.id === 'review-today'}
             />
           ))}
         </div>
@@ -373,7 +462,7 @@ export default function DSAPage() {
           )}
         </DragOverlay>
       </DndContext>
-    </div>
+    </motion.div>
   )
 }
 
@@ -381,16 +470,21 @@ function KanbanColumn({
   column,
   problems,
   onDelete,
+  onReview,
   isLoading,
+  isReviewColumn,
 }: {
-  column: { id: ProblemStatus; title: string; color: string }
+  column: { id: ProblemStatus | 'review-today'; title: string; color: string }
   problems: Problem[]
   onDelete: (id: string) => void
+  onReview: (id: string, quality: 1 | 3 | 5) => void
   isLoading: boolean
+  isReviewColumn?: boolean
 }) {
   const { setNodeRef, isOver } = useSortable({
     id: column.id,
     data: { type: 'column' },
+    disabled: isReviewColumn,
   })
 
   return (
@@ -398,12 +492,15 @@ function KanbanColumn({
       ref={setNodeRef}
       className={cn(
         'flex flex-col rounded-xl glass-panel border border-border/50 min-h-[300px]',
-        isOver && 'border-primary/50 bg-primary/5'
+        isOver && !isReviewColumn && 'border-primary/50 bg-primary/5'
       )}
     >
       <div className="flex items-center justify-between p-4 border-b border-border/50">
         <div className="flex items-center gap-2">
-          <span className={cn('font-semibold', column.color)}>{column.title}</span>
+          {isReviewColumn && (
+            <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+          )}
+          <span className={cn('font-semibold text-sm', column.color)}>{column.title}</span>
           <Badge variant="secondary" className="text-xs">
             {problems.length}
           </Badge>
@@ -430,6 +527,9 @@ function KanbanColumn({
                     <SortableProblemCard
                       problem={problem}
                       onDelete={onDelete}
+                      onReview={onReview}
+                      isReviewCard={isReviewColumn}
+                      isStruggling={problem.status === 'review'}
                     />
                   </StaggerItem>
                 ))}
@@ -445,9 +545,15 @@ function KanbanColumn({
 function SortableProblemCard({
   problem,
   onDelete,
+  onReview,
+  isReviewCard,
+  isStruggling,
 }: {
   problem: Problem
   onDelete: (id: string) => void
+  onReview: (id: string, quality: 1 | 3 | 5) => void
+  isReviewCard?: boolean
+  isStruggling?: boolean
 }) {
   const {
     attributes,
@@ -470,6 +576,9 @@ function SortableProblemCard({
         isDragging={isDragging}
         dragHandleProps={listeners}
         onDelete={onDelete}
+        onReview={onReview}
+        isReviewCard={isReviewCard}
+        isStruggling={isStruggling}
       />
     </div>
   )
@@ -480,19 +589,37 @@ function ProblemCard({
   isDragging,
   dragHandleProps,
   onDelete,
+  onReview,
+  isReviewCard,
+  isStruggling,
 }: {
   problem: Problem
   isDragging?: boolean
   dragHandleProps?: Record<string, unknown>
   onDelete?: (id: string) => void
+  onReview?: (id: string, quality: 1 | 3 | 5) => void
+  isReviewCard?: boolean
+  isStruggling?: boolean
 }) {
+  const [showActions, setShowActions] = useState(false)
+
   return (
     <motion.div
       layout
+      layoutId={problem._id}
+      variants={cardItem}
+      whileHover={{ scale: 1.01 }}
+      transition={springConfig}
+      onMouseEnter={() => setShowActions(true)}
+      onMouseLeave={() => setShowActions(false)}
       className={cn(
         'rounded-lg border border-border/50 bg-card p-3 cursor-default',
-        isDragging && 'opacity-50 shadow-lg'
+        isDragging && 'opacity-50 shadow-lg',
+        isStruggling && 'animate-[border-pulse_3s_ease-in-out_infinite]'
       )}
+      style={isStruggling ? {
+        animation: 'border-pulse 3s ease-in-out infinite'
+      } : undefined}
     >
       <div className="flex items-start gap-2">
         <button
@@ -551,6 +678,51 @@ function ProblemCard({
             <p className="text-xs text-muted-foreground mt-2 line-clamp-2">
               {problem.notes}
             </p>
+          )}
+
+          {isReviewCard && (
+            <p className="text-xs text-primary mt-2">Spaced repetition — review now</p>
+          )}
+
+          {/* Review action buttons */}
+          {isReviewCard && onReview && (
+            <AnimatePresence>
+              {showActions && (
+                <motion.div
+                  initial={{ opacity: 0, y: 5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 5 }}
+                  className="flex gap-2 mt-3"
+                >
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1 text-xs h-7 border-green-500/30 text-green-500 hover:bg-green-500/10"
+                    onClick={() => onReview(problem._id, 5)}
+                  >
+                    <Check className="h-3 w-3 mr-1" />
+                    Easy
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1 text-xs h-7 border-primary/30 text-primary hover:bg-primary/10"
+                    onClick={() => onReview(problem._id, 3)}
+                  >
+                    Got It
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1 text-xs h-7 border-destructive/30 text-destructive hover:bg-destructive/10"
+                    onClick={() => onReview(problem._id, 1)}
+                  >
+                    <X className="h-3 w-3 mr-1" />
+                    Hard
+                  </Button>
+                </motion.div>
+              )}
+            </AnimatePresence>
           )}
         </div>
       </div>

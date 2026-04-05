@@ -1,74 +1,47 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Zap, ArrowRight, Check, Sparkles } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { ArrowRight } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import { FadeIn, TypingEffect, PulseRing } from '@/components/motion'
-import { useUserStore, type UserProfile } from '@/lib/store'
+import { TypingEffect, ThinkingDots } from '@/components/motion'
+import { useUserStore, type UserProfile, type CharacterDNA } from '@/lib/store'
 import { cn } from '@/lib/utils'
+import { questionTransition } from '@/lib/animations'
 
-const branches = [
-  'Computer Science',
-  'Information Technology',
-  'Electronics',
-  'Electrical',
-  'Mechanical',
-  'Civil',
-  'Chemical',
-  'Other',
+const QUESTIONS = [
+  "When you have free time and nobody's watching — what do you actually end up doing?",
+  "What's something you care about that you've never told anyone?",
+  "When things get hard, do you push harder, go quiet, or spiral?",
+  "What does a perfect day look like for you — the real one, not the ideal?",
+  "What's the one thing you keep telling yourself you'll start someday?",
+  "Five years from now, you're proud of yourself. What happened?",
+  "What's your relationship with failure? Does it teach you or break you?",
+  "Late night, deadline tomorrow, everything's behind — what do you actually do?",
+  "What kind of support do you actually want when you're struggling?",
+  "One word. How are you, really, right now?"
 ]
 
-const companies = [
-  'Google',
-  'Microsoft',
-  'Amazon',
-  'Meta',
-  'Apple',
-  'Netflix',
-  'Adobe',
-  'Uber',
-  'Airbnb',
-  'Stripe',
-  'Oracle',
-  'Salesforce',
-  'Goldman Sachs',
-  'Morgan Stanley',
-  'JPMorgan',
-  'Others',
-]
+const HYBRID_CHIPS: Record<number, string[]> = {
+  2: ["Push harder", "Go quiet", "Spiral", "Depends on the day"],
+  5: ["Got my dream job", "Built something meaningful", "Found balance", "Made an impact"],
+  8: ["Just listen", "Give me a plan", "Challenge me", "Leave me alone"]
+}
 
-const dsaLevels = [
-  { value: 'beginner', label: 'Beginner', description: 'Just starting with DSA' },
-  { value: 'intermediate', label: 'Intermediate', description: 'Comfortable with basic concepts' },
-  { value: 'advanced', label: 'Advanced', description: 'Ready for complex problems' },
-] as const
-
-type Step = 'welcome' | 'basics' | 'targets' | 'level' | 'complete'
+type Stage = 'opening' | 'questions' | 'processing'
 
 export default function OnboardingPage() {
   const router = useRouter()
   const { setUser, isOnboarded } = useUserStore()
-  const [step, setStep] = useState<Step>('welcome')
-  const [formData, setFormData] = useState<Partial<UserProfile>>({
-    name: '',
-    email: '',
-    branch: '',
-    semester: 1,
-    targetCompanies: [],
-    dsaLevel: 'beginner',
-  })
+  const [stage, setStage] = useState<Stage>('opening')
+  const [currentQuestion, setCurrentQuestion] = useState(0)
+  const [answers, setAnswers] = useState<string[]>(Array(10).fill(''))
+  const [inputValue, setInputValue] = useState('')
+  const [showInput, setShowInput] = useState(false)
+  const [titleComplete, setTitleComplete] = useState(false)
+  const [processingText, setProcessingText] = useState('')
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     if (isOnboarded) {
@@ -76,342 +49,280 @@ export default function OnboardingPage() {
     }
   }, [isOnboarded, router])
 
-  const handleNext = () => {
-    const steps: Step[] = ['welcome', 'basics', 'targets', 'level', 'complete']
-    const currentIndex = steps.indexOf(step)
-    if (currentIndex < steps.length - 1) {
-      setStep(steps[currentIndex + 1])
+  useEffect(() => {
+    if (stage === 'opening' && titleComplete) {
+      const timer = setTimeout(() => setShowInput(true), 1800)
+      return () => clearTimeout(timer)
+    }
+  }, [stage, titleComplete])
+
+  useEffect(() => {
+    if (showInput && textareaRef.current) {
+      textareaRef.current.focus()
+    }
+  }, [showInput, currentQuestion])
+
+  const handleSubmit = () => {
+    if (!inputValue.trim()) return
+    
+    const newAnswers = [...answers]
+    newAnswers[currentQuestion] = inputValue.trim()
+    setAnswers(newAnswers)
+    setInputValue('')
+    
+    if (currentQuestion < 9) {
+      setCurrentQuestion(prev => prev + 1)
+    } else {
+      setStage('processing')
+      processOnboarding(newAnswers)
     }
   }
 
-  const handleComplete = () => {
-    setUser(formData as UserProfile)
+  const handleChipClick = (chip: string) => {
+    setInputValue(chip)
+    setTimeout(() => {
+      const newAnswers = [...answers]
+      newAnswers[currentQuestion] = chip
+      setAnswers(newAnswers)
+      setInputValue('')
+      
+      if (currentQuestion < 9) {
+        setCurrentQuestion(prev => prev + 1)
+      } else {
+        setStage('processing')
+        processOnboarding(newAnswers)
+      }
+    }, 400)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSubmit()
+    }
+  }
+
+  const processOnboarding = async (finalAnswers: string[]) => {
+    setProcessingText('Getting to know you...')
+    
+    await new Promise(resolve => setTimeout(resolve, 1500))
+    setProcessingText('Building your profile...')
+    
+    // Create basic user profile
+    const userProfile: UserProfile = {
+      id: Date.now().toString(),
+      name: 'Student', // Will be extracted or asked later
+      email: `user-${Date.now()}@jarvis.app`,
+      branch: 'Computer Science',
+      semester: 4,
+      targetCompanies: ['Google', 'Microsoft', 'Amazon'],
+      dsaLevel: 'intermediate',
+      onboardingAnswers: finalAnswers,
+      characterDNA: null,
+      totalXP: 100,
+      streak: 1,
+      lastActiveDate: new Date().toISOString().split('T')[0]
+    }
+
+    try {
+      const response = await fetch('/api/onboarding', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answers: finalAnswers, userProfile })
+      })
+      
+      const data = await response.json()
+      
+      if (data.characterDNA) {
+        userProfile.characterDNA = data.characterDNA as CharacterDNA
+      }
+      if (data.totalXP) {
+        userProfile.totalXP = data.totalXP
+      }
+    } catch (error) {
+      console.error('Onboarding API error:', error)
+      // Continue with default profile
+    }
+
+    setUser(userProfile)
+    
+    await new Promise(resolve => setTimeout(resolve, 500))
     router.push('/chat')
   }
 
-  const toggleCompany = (company: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      targetCompanies: prev.targetCompanies?.includes(company)
-        ? prev.targetCompanies.filter((c) => c !== company)
-        : [...(prev.targetCompanies || []), company],
-    }))
-  }
-
-  const canProceed = () => {
-    switch (step) {
-      case 'welcome':
-        return true
-      case 'basics':
-        return formData.name && formData.email && formData.branch && formData.semester
-      case 'targets':
-        return (formData.targetCompanies?.length || 0) > 0
-      case 'level':
-        return !!formData.dsaLevel
-      default:
-        return true
-    }
-  }
+  const progress = ((currentQuestion + 1) / 10) * 100
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4 relative overflow-hidden">
-      {/* Background effects */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/5 rounded-full blur-3xl" />
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-primary/5 rounded-full blur-3xl" />
-        <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-primary/5 via-transparent to-transparent" />
-      </div>
-
-      <div className="relative z-10 w-full max-w-2xl">
-        <AnimatePresence mode="wait">
-          {step === 'welcome' && (
-            <motion.div
-              key="welcome"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="text-center space-y-8"
-            >
-              <div className="flex justify-center">
-                <PulseRing size={120} color="var(--primary)" />
-              </div>
-              
-              <FadeIn delay={0.3}>
-                <div className="flex items-center justify-center gap-3 mb-4">
-                  <Zap className="h-8 w-8 text-primary" />
-                  <h1 className="text-4xl font-bold text-primary animate-text-glow">
-                    J.A.R.V.I.S.
-                  </h1>
-                </div>
-              </FadeIn>
-
-              <FadeIn delay={0.5}>
-                <p className="text-xl text-muted-foreground">
-                  <TypingEffect
-                    text="Good day. I am your AI Study Companion."
-                    speed={40}
-                    delay={800}
-                  />
-                </p>
-              </FadeIn>
-
-              <FadeIn delay={2}>
-                <p className="text-muted-foreground max-w-md mx-auto">
-                  I will help you master Data Structures & Algorithms, track your goals,
-                  and prepare for your dream company placements.
-                </p>
-              </FadeIn>
-
-              <FadeIn delay={2.5}>
-                <Button
-                  size="lg"
-                  onClick={handleNext}
-                  className="bg-primary text-primary-foreground hover:bg-primary/90 animate-pulse-glow"
+    <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4 relative overflow-hidden">
+      <AnimatePresence mode="wait">
+        {stage === 'opening' && !showInput && (
+          <motion.div
+            key="title"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="text-center"
+          >
+            <h1 className="text-6xl font-bold tracking-tight text-primary">
+              <TypingEffect 
+                text="J.A.R.V.I.S." 
+                speed={60} 
+                cursor={false}
+                onComplete={() => setTitleComplete(true)}
+              />
+            </h1>
+            
+            {titleComplete && (
+              <>
+                <motion.p
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.8 }}
+                  className="text-xl text-muted-foreground mt-4"
                 >
-                  Initialize Setup
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              </FadeIn>
-            </motion.div>
-          )}
+                  Let&apos;s get to know you.
+                </motion.p>
+                
+                <motion.div
+                  initial={{ opacity: 0, scaleX: 0 }}
+                  animate={{ opacity: 0.3, scaleX: 1 }}
+                  transition={{ delay: 1.4 }}
+                  className="w-48 h-px bg-primary mx-auto mt-6"
+                />
+              </>
+            )}
+          </motion.div>
+        )}
 
-          {step === 'basics' && (
-            <motion.div
-              key="basics"
-              initial={{ opacity: 0, x: 50 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -50 }}
-              className="space-y-8"
-            >
-              <div className="text-center space-y-2">
-                <h2 className="text-2xl font-bold text-primary">Basic Information</h2>
-                <p className="text-muted-foreground">Tell me about yourself</p>
-              </div>
-
-              <div className="glass-panel rounded-xl p-6 space-y-6">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="name">Full Name</Label>
-                    <Input
-                      id="name"
-                      placeholder="Enter your name"
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      className="bg-input border-border/50 focus:border-primary"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="email">Email</Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      placeholder="your@email.com"
-                      value={formData.email}
-                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      className="bg-input border-border/50 focus:border-primary"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>Branch</Label>
-                    <Select
-                      value={formData.branch}
-                      onValueChange={(value) => setFormData({ ...formData, branch: value })}
-                    >
-                      <SelectTrigger className="bg-input border-border/50 focus:border-primary">
-                        <SelectValue placeholder="Select branch" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {branches.map((branch) => (
-                          <SelectItem key={branch} value={branch}>
-                            {branch}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Semester</Label>
-                    <Select
-                      value={String(formData.semester)}
-                      onValueChange={(value) => setFormData({ ...formData, semester: parseInt(value) })}
-                    >
-                      <SelectTrigger className="bg-input border-border/50 focus:border-primary">
-                        <SelectValue placeholder="Select semester" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {[1, 2, 3, 4, 5, 6, 7, 8].map((sem) => (
-                          <SelectItem key={sem} value={String(sem)}>
-                            Semester {sem}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex justify-end">
-                <Button
-                  onClick={handleNext}
-                  disabled={!canProceed()}
-                  className="bg-primary text-primary-foreground hover:bg-primary/90"
+        {(stage === 'opening' && showInput) || stage === 'questions' ? (
+          <motion.div
+            key="questions"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="w-full max-w-2xl space-y-8"
+          >
+            {/* Previous questions stack */}
+            <div className="space-y-3">
+              {answers.slice(0, currentQuestion).map((answer, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0.2 }}
+                  animate={{ opacity: 0.2 }}
+                  className="text-sm text-muted-foreground"
                 >
-                  Continue
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              </div>
-            </motion.div>
-          )}
+                  <span className="text-primary mr-2">●</span>
+                  {QUESTIONS[i]}
+                </motion.div>
+              ))}
+            </div>
 
-          {step === 'targets' && (
-            <motion.div
-              key="targets"
-              initial={{ opacity: 0, x: 50 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -50 }}
-              className="space-y-8"
-            >
-              <div className="text-center space-y-2">
-                <h2 className="text-2xl font-bold text-primary">Target Companies</h2>
-                <p className="text-muted-foreground">Select companies you are preparing for</p>
-              </div>
-
-              <div className="glass-panel rounded-xl p-6">
-                <div className="flex flex-wrap gap-3">
-                  {companies.map((company) => {
-                    const isSelected = formData.targetCompanies?.includes(company)
-                    return (
-                      <Badge
-                        key={company}
-                        variant={isSelected ? 'default' : 'outline'}
-                        className={cn(
-                          'cursor-pointer px-4 py-2 text-sm transition-all',
-                          isSelected
-                            ? 'bg-primary text-primary-foreground border-primary'
-                            : 'bg-transparent border-border hover:border-primary hover:text-primary'
-                        )}
-                        onClick={() => toggleCompany(company)}
-                      >
-                        {isSelected && <Check className="mr-1 h-3 w-3" />}
-                        {company}
-                      </Badge>
-                    )
-                  })}
-                </div>
-              </div>
-
-              <div className="flex justify-end">
-                <Button
-                  onClick={handleNext}
-                  disabled={!canProceed()}
-                  className="bg-primary text-primary-foreground hover:bg-primary/90"
-                >
-                  Continue
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              </div>
-            </motion.div>
-          )}
-
-          {step === 'level' && (
-            <motion.div
-              key="level"
-              initial={{ opacity: 0, x: 50 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -50 }}
-              className="space-y-8"
-            >
-              <div className="text-center space-y-2">
-                <h2 className="text-2xl font-bold text-primary">DSA Proficiency</h2>
-                <p className="text-muted-foreground">What is your current level?</p>
-              </div>
-
-              <div className="space-y-4">
-                {dsaLevels.map((level) => (
-                  <motion.div
-                    key={level.value}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => setFormData({ ...formData, dsaLevel: level.value })}
-                    className={cn(
-                      'glass-panel rounded-xl p-4 cursor-pointer transition-all border',
-                      formData.dsaLevel === level.value
-                        ? 'border-primary bg-primary/10'
-                        : 'border-border/50 hover:border-primary/50'
-                    )}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="font-semibold text-foreground">{level.label}</h3>
-                        <p className="text-sm text-muted-foreground">{level.description}</p>
-                      </div>
-                      {formData.dsaLevel === level.value && (
-                        <div className="h-6 w-6 rounded-full bg-primary flex items-center justify-center">
-                          <Check className="h-4 w-4 text-primary-foreground" />
-                        </div>
-                      )}
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-
-              <div className="flex justify-end">
-                <Button
-                  onClick={handleNext}
-                  disabled={!canProceed()}
-                  className="bg-primary text-primary-foreground hover:bg-primary/90"
-                >
-                  Complete Setup
-                  <Sparkles className="ml-2 h-4 w-4" />
-                </Button>
-              </div>
-            </motion.div>
-          )}
-
-          {step === 'complete' && (
-            <motion.div
-              key="complete"
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="text-center space-y-8"
-            >
+            {/* Current question */}
+            <AnimatePresence mode="wait">
               <motion.div
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={{ type: 'spring', delay: 0.2 }}
-                className="mx-auto w-20 h-20 rounded-full bg-primary/20 flex items-center justify-center"
+                key={currentQuestion}
+                variants={questionTransition}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                className="space-y-6"
+                onAnimationComplete={() => {
+                  if (stage === 'opening') setStage('questions')
+                }}
               >
-                <Check className="h-10 w-10 text-primary" />
+                <div className="flex items-start gap-3">
+                  <span className="text-primary mt-1">●</span>
+                  <p className="text-lg text-foreground leading-relaxed">
+                    {QUESTIONS[currentQuestion]}
+                  </p>
+                </div>
+
+                <div className="relative">
+                  <textarea
+                    ref={textareaRef}
+                    value={inputValue}
+                    onChange={(e) => setInputValue(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="..."
+                    className="w-full bg-transparent border-0 border-b border-border/50 focus:border-primary transition-colors duration-300 resize-none min-h-[60px] outline-none text-foreground placeholder:text-muted-foreground/50 pb-2"
+                    rows={2}
+                  />
+                  
+                  {inputValue.trim() && (
+                    <motion.button
+                      initial={{ opacity: 0, scale: 0.8 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                      onClick={handleSubmit}
+                      className="absolute right-2 bottom-4 p-2 text-primary hover:text-primary/80"
+                    >
+                      <ArrowRight className="h-5 w-5" />
+                    </motion.button>
+                  )}
+                </div>
+
+                {/* Hybrid chips for specific questions */}
+                {HYBRID_CHIPS[currentQuestion] && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.3 }}
+                    className="flex flex-wrap gap-2"
+                  >
+                    {HYBRID_CHIPS[currentQuestion].map((chip) => (
+                      <Badge
+                        key={chip}
+                        variant="outline"
+                        className={cn(
+                          "cursor-pointer border-primary/30 hover:bg-primary/10 transition-colors px-3 py-1.5",
+                          inputValue === chip && "bg-primary/10 border-primary"
+                        )}
+                        onClick={() => handleChipClick(chip)}
+                      >
+                        {chip}
+                      </Badge>
+                    ))}
+                  </motion.div>
+                )}
               </motion.div>
+            </AnimatePresence>
+          </motion.div>
+        ) : null}
 
-              <FadeIn delay={0.3}>
-                <h2 className="text-3xl font-bold text-primary">Systems Online</h2>
-              </FadeIn>
+        {stage === 'processing' && (
+          <motion.div
+            key="processing"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="text-center space-y-6"
+          >
+            <ThinkingDots className="justify-center" size={8} />
+            <motion.p
+              key={processingText}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="text-muted-foreground"
+            >
+              {processingText}
+            </motion.p>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-              <FadeIn delay={0.5}>
-                <p className="text-muted-foreground max-w-md mx-auto">
-                  Welcome, {formData.name}. All systems are initialized and ready.
-                  I am at your service.
-                </p>
-              </FadeIn>
-
-              <FadeIn delay={0.7}>
-                <Button
-                  size="lg"
-                  onClick={handleComplete}
-                  className="bg-primary text-primary-foreground hover:bg-primary/90 animate-pulse-glow"
-                >
-                  Launch J.A.R.V.I.S.
-                  <Zap className="ml-2 h-4 w-4" />
-                </Button>
-              </FadeIn>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+      {/* Progress bar at bottom */}
+      {stage !== 'processing' && showInput && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="fixed bottom-0 left-0 right-0 h-0.5 bg-primary/30"
+        >
+          <motion.div
+            className="h-full bg-primary"
+            initial={{ width: 0 }}
+            animate={{ width: `${progress}%` }}
+            transition={{ duration: 0.3 }}
+          />
+        </motion.div>
+      )}
     </div>
   )
 }
