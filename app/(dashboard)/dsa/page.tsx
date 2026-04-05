@@ -29,6 +29,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -339,6 +340,7 @@ export default function DSAPage() {
               <DialogContent className="glass-panel border-border/50">
                 <DialogHeader>
                   <DialogTitle>Add New Problem</DialogTitle>
+                  <DialogDescription>Add a new DSA problem to track your progress and practice.</DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 pt-4">
                   <div className="space-y-2">
